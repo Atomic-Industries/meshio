@@ -522,4 +522,51 @@ def write_binary_file(f, mesh):
         tmp_array.tofile(fh)
 
 
+
+def write_sol(filename, mesh, field_key, float_fmt=".16e"):
+    if str(filename)[-1] == "b":
+        raise NotImplementedError
+    else:
+        write_ascii_sol(filename, mesh, field_key, float_fmt)
+
+
+def write_ascii_sol(filename, mesh, field_key, float_fmt=".16e"):
+    with open_file(filename, "wb") as fh:
+        version = {np.dtype(c_float): 1, np.dtype(c_double): 2}[mesh.points.dtype]
+        # N. B.: PEP 461 Adding % formatting to bytes and bytearray
+        fh.write(f"MeshVersionFormatted {version}\n".encode())
+
+        n, d = mesh.points.shape
+        data = mesh.point_data[field_key]
+        if len(data.shape) == 1: data = data[:, None]  # Add axis for scalar data
+
+        fh.write(f"Dimension {d}\n".encode())
+
+        # vertices
+        fh.write(b"\nSolAtVertices\n")
+        fh.write(f"{n}\n".encode())
+
+        # number and type of solutions (1:scalar, 2:vector, 3:tensor)
+        nsol = 1  # Always one solution/file for MMG
+
+        # Dictionary of data.shape[1:] -> (sol_type, n_entries)
+        sol_types = {
+            (1,):   (1, 1),          # Scalar data
+            (d,):   (2, d),          # Vector data
+            (d, d): (3, d*(d+1)//2)  # Tensor data (upper triangular)
+        }
+        sol_type, n_entries = sol_types[data.shape[1:]]
+
+        fh.write(f"{nsol} {sol_type}\n".encode())
+
+        fmt = " ".join(["{:" + float_fmt + "}"] * n_entries) + " \n"
+        for x in data:
+            if sol_type == 3:
+                fh.write(fmt.format(*x[np.triu_indices(d)]).encode())
+            else:
+                fh.write(fmt.format(*x).encode())
+
+        fh.write(b"\nEnd\n")
+
+
 register_format("medit", [".mesh", ".meshb"], read, {"medit": write})
